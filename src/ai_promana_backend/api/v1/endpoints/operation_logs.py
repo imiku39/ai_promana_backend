@@ -1,4 +1,5 @@
-﻿from fastapi import APIRouter, Query
+﻿# TODO: 操作日志接口当前为首版联调实现，后续接入操作日志中间件产物和真实分页查询。
+from fastapi import APIRouter, Query
 
 from ai_promana_backend.api.v1.endpoints import _mock
 
@@ -6,7 +7,7 @@ from ai_promana_backend.api.v1.endpoints import _mock
 router = APIRouter()
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 从操作日志表按 targetId/operatorId 分页查询，并补充目标类型、操作者和变更摘要。
 @router.get("", summary="操作日志列表")
 def list_operation_logs(
     targetId: str | None = Query(default=None),

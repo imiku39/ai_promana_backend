@@ -1,4 +1,5 @@
-﻿from typing import Any
+﻿# TODO: 审计日志接口当前为首版联调实现，后续接入操作日志表、筛选查询、导出任务和权限校验。
+from typing import Any
 
 from fastapi import APIRouter, Body, Query
 
@@ -40,7 +41,7 @@ def _audit_items() -> list[dict[str, Any]]:
     ]
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 从审计日志表分页查询，支持 keyword/type/timeRange 过滤，并补充操作者与目标资源信息。
 @router.get("/logs", summary="审计日志列表")
 def list_admin_logs(
     keyword: str | None = Query(default=None),
@@ -65,7 +66,7 @@ def list_admin_logs(
     return _mock.api_response(data)
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 创建审计日志导出任务，复用列表筛选条件，并限制只有 admin:log:export 可调用。
 @router.post("/logs/export", summary="导出审计日志")
 def export_admin_logs(payload: dict[str, Any] | None = Body(default=None)):
     task = _mock.export_task("audit_log_export")

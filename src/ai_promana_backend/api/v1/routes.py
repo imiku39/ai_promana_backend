@@ -1,3 +1,4 @@
+﻿# TODO: 后续真实服务接入后，统一梳理 /api 与 /api/v1 的版本策略、tags 和兼容路由保留周期。
 from fastapi import APIRouter
 from ai_promana_backend.api.v1.endpoints import (
     admin,

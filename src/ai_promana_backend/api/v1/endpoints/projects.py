@@ -1,4 +1,5 @@
-﻿from typing import Any
+﻿# TODO: 项目接口当前为首版联调实现，后续接入项目 service、数据库查询、草稿保存和业务校验。
+from typing import Any
 
 from fastapi import APIRouter, Body, Query
 
@@ -8,7 +9,7 @@ from ai_promana_backend.api.v1.endpoints import _mock
 router = APIRouter()
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 按当前用户可见项目统计总数、状态、健康度和平均进度，避免统计无权限项目。
 @router.get("/summary", summary="项目矩阵头部统计")
 def get_projects_summary():
     items = _mock.projects()
@@ -23,7 +24,7 @@ def get_projects_summary():
     )
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 使用数据库分页查询项目矩阵，支持 keyword/status/health/owner/tag 和安全排序字段白名单。
 @router.get("", summary="项目列表、筛选、排序")
 def list_projects(
     keyword: str | None = Query(default=None),
@@ -57,7 +58,7 @@ def list_projects(
     return _mock.api_response(_mock.paged(items, page, pageSize))
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 从团队、用户、项目模板和页面配置表读取创建项目所需选项，并按 project:create 权限裁剪。
 @router.get("/create-options", summary="新建项目弹窗字典")
 def get_project_create_options():
     options = _mock.option_items()
@@ -77,13 +78,13 @@ def get_project_create_options():
     return _mock.api_response(options)
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 将项目创建表单保存到草稿表，支持同一用户覆盖更新未提交草稿。
 @router.post("/drafts", summary="保存项目草稿")
 def save_project_draft(payload: dict[str, Any] = Body(...)):
     return _mock.api_response({"draftId": _mock.make_id("project_draft"), "savedAt": _mock.now_iso(), "draft": payload})
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 校验 code 唯一、日期范围、模板和成员有效性，创建项目、成员关系、默认看板和订阅配置。
 @router.post("", summary="创建项目")
 def create_project(payload: dict[str, Any] = Body(...)):
     project = {
@@ -104,7 +105,7 @@ def create_project(payload: dict[str, Any] = Body(...)):
     return _mock.api_response({"project": project})
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 查询项目头部信息、启用页签、成员摘要和当前用户项目权限；项目不存在返回 PROJECT_NOT_FOUND。
 @router.get("/{projectId}", summary="项目头部信息、可用页签、权限")
 def get_project(projectId: str):
     project = _mock.project_lite(projectId)
@@ -135,7 +136,7 @@ def get_project(projectId: str):
     )
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 聚合概览页所有卡片数据，拆分调用里程碑、任务、成员负载、风险、报表和文档服务。
 @router.get("/{projectId}/overview", summary="项目概览页聚合数据")
 def get_project_overview(projectId: str):
     project = _mock.project_lite(projectId)
@@ -167,13 +168,13 @@ def get_project_overview(projectId: str):
     )
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 读取项目编辑表单初始值和可选字典，带出 version 用于后续乐观锁更新。
 @router.get("/{projectId}/edit-form", summary="编辑弹窗初始化")
 def get_project_edit_form(projectId: str):
     return _mock.api_response({"project": _mock.project_lite(projectId), "options": _mock.option_items()})
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 保存项目变更时校验 version、日期范围、成员/订阅人有效性，并同步项目动态。
 @router.put("/{projectId}", summary="保存项目变更")
 def update_project(projectId: str, payload: dict[str, Any] = Body(...)):
     project = _mock.project_lite(projectId)
@@ -183,19 +184,19 @@ def update_project(projectId: str, payload: dict[str, Any] = Body(...)):
     return _mock.api_response({"project": project})
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 保存项目编辑草稿，区分创建草稿和已存在项目编辑草稿，返回可恢复的 draftId。
 @router.post("/{projectId}/draft", summary="保存编辑草稿")
 def save_project_edit_draft(projectId: str, payload: dict[str, Any] = Body(...)):
     return _mock.api_response({"projectId": projectId, "draftId": _mock.make_id("project_edit_draft"), "savedAt": _mock.now_iso(), "draft": payload})
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 归档前校验未完成任务、未关闭风险和权限，执行软归档并禁止后续写操作。
 @router.post("/{projectId}/archive", summary="归档项目")
 def archive_project(projectId: str, payload: dict[str, Any] | None = Body(default=None)):
     return _mock.api_response({"projectId": projectId, "status": "archived", "reason": (payload or {}).get("reason"), "archivedAt": _mock.now_iso()})
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 生成项目排期/任务快照作为基线，保存快照明细并返回 baselineId。
 @router.post("/{projectId}/baseline", summary="设置项目基线")
 def set_project_baseline(projectId: str, payload: dict[str, Any] = Body(default_factory=dict)):
     return _mock.api_response(

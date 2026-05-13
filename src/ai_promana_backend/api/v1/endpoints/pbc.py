@@ -1,4 +1,5 @@
-﻿from typing import Any
+﻿# TODO: 工作台/PBC 接口当前为首版联调实现，后续接入任务、日报、PBC 目标和 AI 建议服务。
+from typing import Any
 
 from fastapi import APIRouter, Body
 
@@ -8,7 +9,7 @@ from ai_promana_backend.api.v1.endpoints import _mock
 router = APIRouter()
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 聚合当前用户今日日志、明日计划、阻塞任务、看板任务和 PBC 目标，按用户可见项目过滤。
 @router.get("/overview", summary="工作台聚合数据")
 def get_workbench_overview():
     return _mock.api_response(
@@ -58,7 +59,7 @@ def get_workbench_overview():
     )
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 从 PBC 目标表查询当前周期目标，包含关键结果、负责人、进度和关联任务统计。
 @router.get("/pbc-objectives", summary="PBC 目标列表")
 def list_pbc_objectives():
     return _mock.api_response(
@@ -74,7 +75,7 @@ def list_pbc_objectives():
     )
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 校验目标周期和 keyResults 后创建 PBC 目标，并关联当前用户或指定负责人。
 @router.post("/pbc-objectives", summary="创建 PBC 目标")
 def create_pbc_objective(payload: dict[str, Any] = Body(...)):
     return _mock.api_response(

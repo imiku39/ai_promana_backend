@@ -1,4 +1,5 @@
-﻿from typing import Any
+﻿# TODO: 风险接口当前为首版联调实现，后续接入风险台账、状态流转、批量处理和导出任务。
+from typing import Any
 
 from fastapi import APIRouter, Body
 
@@ -8,7 +9,7 @@ from ai_promana_backend.api.v1.endpoints import _mock
 router = APIRouter()
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 查询风险台账、资源热力图、筛选项和 AI 洞察，按 project:risk:read 校验访问。
 @router.get("/{projectId}/risks/page-data", summary="风险页聚合数据")
 def get_project_risks_page(projectId: str):
     return _mock.api_response(
@@ -35,7 +36,7 @@ def get_project_risks_page(projectId: str):
     )
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 校验风险标题、等级、负责人和关联任务，创建风险记录并通知负责人。
 @router.post("/{projectId}/risks", summary="新建风险")
 def create_project_risk(projectId: str, payload: dict[str, Any] = Body(...)):
     risk = {
@@ -52,13 +53,13 @@ def create_project_risk(projectId: str, payload: dict[str, Any] = Body(...)):
     return _mock.api_response({"risk": risk})
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 更新风险字段时校验风险归属项目和并发版本，记录变更历史。
 @router.put("/{projectId}/risks/{riskId}", summary="更新风险")
 def update_project_risk(projectId: str, riskId: str, payload: dict[str, Any] = Body(...)):
     return _mock.api_response({"projectId": projectId, "riskId": riskId, "risk": payload, "updatedAt": _mock.now_iso()})
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 实现风险状态机 open/processing/mitigated/closed，非法流转返回 TASK_TRANSITION_INVALID 类业务错误。
 @router.post("/{projectId}/risks/{riskId}/transition", summary="风险状态流转")
 def transition_project_risk(projectId: str, riskId: str, payload: dict[str, Any] = Body(...)):
     return _mock.api_response(
@@ -71,7 +72,7 @@ def transition_project_risk(projectId: str, riskId: str, payload: dict[str, Any]
     )
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 批量处理风险时逐条校验权限和状态，返回成功、失败和跳过明细。
 @router.post("/{projectId}/risks/batch-resolve", summary="批量处理风险")
 def batch_resolve_project_risks(projectId: str, payload: dict[str, Any] = Body(...)):
     return _mock.api_response(
@@ -84,7 +85,7 @@ def batch_resolve_project_risks(projectId: str, payload: dict[str, Any] = Body(.
     )
 
 
-# TODO: 接入真实业务服务、权限校验、数据持久化和业务错误码。
+# TODO: 创建风险清单导出任务，复用当前筛选条件并生成 Excel/CSV 下载地址。
 @router.post("/{projectId}/risks/export", summary="导出风险清单")
 def export_project_risks(projectId: str, payload: dict[str, Any] | None = Body(default=None)):
     task = _mock.export_task("risk_export")
