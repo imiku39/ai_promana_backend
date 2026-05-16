@@ -29,3 +29,16 @@ class LoginResponse(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
+
+class AuthLoginRequest(BaseModel):
+    username: str = Field(..., description="用户名/邮箱/手机号")
+    password: str = Field(..., description="密码")
+    rememberMe: bool = Field(default=False, description="是否记住我")
+    loginType: str = Field(default="password", description="登录方式")
+    deviceId: Optional[str] = Field(default=None, description="设备标识")
+    clientType: Optional[str] = Field(default="web", description="客户端类型")
+
+
+class RefreshTokenRequest(BaseModel):
+    refreshToken: str = Field(..., description="刷新令牌")

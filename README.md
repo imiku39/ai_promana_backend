@@ -214,6 +214,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - 使用 HS256 算法签名
 - 默认有效期 30 分钟
 - Token 包含：用户 ID、用户名、角色信息
+- `/api/*` 受保护接口统一使用 `Authorization: Bearer <access_token>` 认证
+- Swagger UI 可在右上角点击 `Authorize`，直接粘贴登录返回的 `access_token`
 
 ## 常见问题
 
