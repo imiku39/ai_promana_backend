@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
 
-
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, description="用户名")
     email: Optional[str] = Field(None, max_length=255, description="邮箱地址")
@@ -9,15 +8,24 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=6, description="密码")
     full_name: Optional[str] = Field(None, max_length=100, description="真实姓名")
 
-
-class AuthLoginRequest(BaseModel):
-    username: str = Field(..., description="用户名/邮箱/手机号")
+class UserLogin(BaseModel):
+    username: str = Field(..., description="用户名")
     password: str = Field(..., description="密码")
-    rememberMe: bool = Field(default=False, description="是否记住我")
-    loginType: str = Field(default="password", description="登录方式")
-    deviceId: Optional[str] = Field(default=None, description="设备标识")
-    clientType: Optional[str] = Field(default="web", description="客户端类型")
 
+class UserOut(BaseModel):
+    id: int
+    username: str
+    email: Optional[str]
+    phone: Optional[str]
+    full_name: Optional[str]
+    role: str
+    created_at: str
+    updated_at: str
 
-class RefreshTokenRequest(BaseModel):
-    refreshToken: str = Field(..., description="刷新令牌")
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+class TokenData(BaseModel):
+    username: Optional[str] = None

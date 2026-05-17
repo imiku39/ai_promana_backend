@@ -1,380 +1,341 @@
-# TODO: /api/auth/* 当前已切到真实 JWT 登录主链路，后续继续补齐注册审核、会话撤销和第三方登录落库。
-from datetime import date, datetime, timedelta
+﻿# TODO: /api/auth/* 当前为首版契约接口，后续需要与旧 /api/v1/users/* 统一认证模型、token 刷新和权限依赖。
 from typing import Any
 
+from fastapi import APIRouter, Body, Depends, Header, HTTPException
 import pymysql
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
-
-from ai_promana_backend.api.v1.endpoints import _mock
-from ai_promana_backend.config import settings
+from datetime import datetime, timedelta
+from ai_promana_backend.database import get_connection, get_db
 from ai_promana_backend.core.security import (
     create_access_token,
-    create_refresh_token,
     decode_access_token,
     get_password_hash,
-    require_access_token,
     verify_password,
 )
-from ai_promana_backend.database import get_db
-from ai_promana_backend.schemas.user import AuthLoginRequest, RefreshTokenRequest, UserCreate
+from ai_promana_backend.schemas.user import UserCreate, UserLogin, UserOut, LoginResponse
+from ai_promana_backend.api.v1.endpoints import _mock
+
+router = APIRouter()
+
+@router.post("/register", response_model=UserOut, summary="用户注册", description="创建新用户账户")
+def register_user(
+    payload: UserCreate,
+    db: pymysql.connections.Connection = Depends(get_db)
+):
+    cursor = None
+    try:
+        cursor = db.cursor()
+        
+        # 检查用户名是否已存在
+        cursor.execute("SELECT id FROM users WHERE username = %s", (payload.username,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="用户名已存在")
+        
+        # 检查邮箱是否已存在
+        if payload.email:
+            cursor.execute("SELECT id FROM users WHERE email = %s", (payload.email,))
+            if cursor.fetchone():
+                raise HTTPException(status_code=400, detail="邮箱已被注册")
+        
+        # 检查手机号是否已存在
+        if payload.phone:
+            cursor.execute("SELECT id FROM users WHERE phone = %s", (payload.phone,))
+            if cursor.fetchone():
+                raise HTTPException(status_code=400, detail="手机号已被注册")
+        
+        # 哈希密码
+        hashed_password = get_password_hash(payload.password)
+        
+        # 插入用户记录
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        email = payload.email or f"{payload.username}@example.local"
+        insert_sql = """
+        INSERT INTO users (username, email, phone, password_hash, real_name, role, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(
+            insert_sql,
+            (
+                payload.username,
+                email,
+                payload.phone,
+                hashed_password,
+                payload.full_name or payload.username,
+                "user",
+                now,
+                now
+            )
+        )
+        user_id = cursor.lastrowid
+        db.commit()
+        
+        # 查询新创建的用户
+        cursor.execute(
+            "SELECT id, username, email, phone, real_name AS full_name, role, created_at, updated_at FROM users WHERE id = %s",
+            (user_id,)
+        )
+        user = cursor.fetchone()
+        
+        return UserOut(
+            id=user["id"],
+            username=user["username"],
+            email=user["email"],
+            phone=user["phone"],
+            full_name=user["full_name"],
+            role=user["role"],
+            created_at=user["created_at"].strftime("%Y-%m-%d %H:%M:%S") if hasattr(user["created_at"], "strftime") else user["created_at"],
+            updated_at=user["updated_at"].strftime("%Y-%m-%d %H:%M:%S") if hasattr(user["updated_at"], "strftime") else user["updated_at"]
+        )
+    
+    except pymysql.MySQLError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"数据库操作失败：{str(e)}")
+    finally:
+        if cursor:
+            cursor.close()
+
+@router.post("/login", response_model=LoginResponse, summary="用户登录", description="用户登录获取访问令牌")
+def login_user(
+    payload: UserLogin,
+    db: pymysql.connections.Connection = Depends(get_db)
+):
+    cursor = None
+    try:
+        cursor = db.cursor()
+        
+        # 查询用户
+        cursor.execute(
+            "SELECT id, username, email, phone, real_name AS full_name, role, password_hash AS password, created_at, updated_at FROM users WHERE username = %s",
+            (payload.username,)
+        )
+        user = cursor.fetchone()
+        
+        # 验证用户是否存在且密码正确
+        if not user or not verify_password(payload.password, user["password"]):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        
+        # 创建访问令牌
+        access_token = create_access_token(data={"sub": user["id"], "username": user["username"], "role": user["role"]})
+        
+        return LoginResponse(
+            access_token=access_token,
+            user=UserOut(
+                id=user["id"],
+                username=user["username"],
+                email=user["email"],
+                phone=user["phone"],
+                full_name=user["full_name"],
+                role=user["role"],
+                created_at=user["created_at"].strftime("%Y-%m-%d %H:%M:%S") if hasattr(user["created_at"], "strftime") else user["created_at"],
+                updated_at=user["updated_at"].strftime("%Y-%m-%d %H:%M:%S") if hasattr(user["updated_at"], "strftime") else user["updated_at"]
+            )
+        )
+    
+    except pymysql.MySQLError as e:
+        raise HTTPException(status_code=500, detail=f"数据库操作失败：{str(e)}")
+    finally:
+        if cursor:
+            cursor.close()
+
 
 auth_router = APIRouter()
-protected_auth_router = APIRouter()
-
-ROLE_LABELS = {
-    "super_admin": "超级管理员",
-    "admin": "管理员",
-    "pm": "项目负责人",
-    "developer": "研发",
-    "qa": "测试",
-    "product": "产品",
-    "collaborator": "协作者",
-    "member": "成员",
-    "user": "普通用户",
-}
-
-ROLE_PERMISSIONS = {
-    "super_admin": [
-        "admin:access",
-        "project:create",
-        "project:read",
-        "project:update",
-        "task:create",
-        "task:update",
-        "report:export",
-        "system:settings:read",
-        "system:settings:update",
-    ],
-    "admin": [
-        "admin:access",
-        "project:create",
-        "project:read",
-        "project:update",
-        "task:create",
-        "task:update",
-        "report:export",
-        "system:settings:read",
-    ],
-    "pm": ["project:read", "project:update", "task:create", "task:update", "report:export"],
-    "developer": ["project:read", "task:create", "task:update"],
-    "qa": ["project:read", "task:update", "report:export"],
-    "product": ["project:read", "task:create"],
-    "collaborator": ["project:read"],
-    "member": ["project:read", "task:update"],
-    "user": ["project:read"],
-}
-
-USER_COLUMNS = """
-id, username, nickname, password_hash, real_name, email, phone, avatar_url,
-role, department, position, status, join_date, last_login_time, created_at, updated_at
-"""
 
 
-def _role_label(role: str | None) -> str:
-    safe_role = role or "user"
-    return ROLE_LABELS.get(safe_role, safe_role)
+ACCESS_EXPIRES_SECONDS = 7200
+REFRESH_EXPIRES_DAYS = 30
 
 
-def _role_permissions(role: str | None) -> list[str]:
-    safe_role = role or "user"
-    return ROLE_PERMISSIONS.get(safe_role, ROLE_PERMISSIONS["user"])
-
-
-def _redirect_path_for_role(role: str | None) -> str:
-    return "/dashboard"
-
-
-def _format_datetime(value: Any) -> str | None:
-    if value is None:
-        return None
-    if hasattr(value, "strftime"):
-        return value.strftime("%Y-%m-%d %H:%M:%S")
-    return str(value)
-
-
-def _format_date(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, date):
-        return value.isoformat()
-    return str(value)
-
-
-def _build_auth_user(user: dict[str, Any]) -> dict[str, Any]:
-    display_name = user.get("real_name") or user.get("nickname") or user["username"]
+def _issue_tokens(current_user: dict[str, Any]) -> dict[str, Any]:
+    token_payload = {
+        "sub": str(current_user["id"]),
+        "username": current_user["username"],
+        "role": current_user.get("platformRole", "user"),
+    }
     return {
-        "id": str(user["id"]),
-        "username": user["username"],
-        "name": display_name,
-        "nickname": user.get("nickname") or display_name,
+        "accessToken": create_access_token(
+            data=token_payload,
+            expires_delta=timedelta(seconds=ACCESS_EXPIRES_SECONDS),
+        ),
+        "refreshToken": create_access_token(
+            data={**token_payload, "tokenType": "refresh"},
+            expires_delta=timedelta(days=REFRESH_EXPIRES_DAYS),
+        ),
+        "expiresIn": ACCESS_EXPIRES_SECONDS,
+    }
+
+
+def _mock_current_user(username: str | None = None) -> dict[str, Any]:
+    current_user = _mock.current_user()
+    if username:
+        current_user["username"] = username
+        current_user["name"] = current_user.get("name") or username
+    return current_user
+
+
+def _db_user_to_current_user(user: dict[str, Any]) -> dict[str, Any]:
+    user_id = str(user.get("user_code") or f"u_{user['id']}")
+    role = user.get("role") or "user"
+    return {
+        "id": user_id,
+        "username": user.get("username") or user_id,
+        "name": user.get("real_name") or user.get("username") or user_id,
+        "nickname": user.get("nickname") or user.get("real_name") or user.get("username") or user_id,
         "avatar": user.get("avatar_url"),
+        "platformRole": role,
         "department": user.get("department"),
         "position": user.get("position"),
-        "role": user.get("role", "user"),
-        "roleName": _role_label(user.get("role")),
-        "accountStatus": user.get("status", "active"),
-        "joinDate": _format_date(user.get("join_date")),
-        "lastLoginAt": _format_datetime(user.get("last_login_time")),
+        "permissions": _permissions_for_role(role),
     }
 
 
-def _build_auth_payload(user: dict[str, Any], remember_me: bool = False) -> dict[str, Any]:
-    access_expires = timedelta(days=7) if remember_me else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    refresh_expires = timedelta(days=30) if remember_me else timedelta(days=7)
-    claims = {
-        "sub": user["id"],
-        "username": user["username"],
-        "role": user.get("role", "user"),
-        "remember_me": remember_me,
-    }
-    auth_user = _build_auth_user(user)
-    return {
-        "accessToken": create_access_token(data=claims, expires_delta=access_expires),
-        "refreshToken": create_refresh_token(data=claims, expires_delta=refresh_expires),
-        "expiresIn": int(access_expires.total_seconds()),
-        "tokenType": "Bearer",
-        "user": auth_user,
-        "currentUser": auth_user,
-        "permissions": _role_permissions(user.get("role")),
-        "redirectPath": _redirect_path_for_role(user.get("role")),
-    }
+def _permissions_for_role(role: str) -> list[str]:
+    if role in {"admin", "super_admin"}:
+        return _mock.current_user()["permissions"]
+    return ["project:read", "task:create", "task:update"]
 
 
-def _raise_auth_error(status_code: int, code: str, message: str) -> None:
-    raise HTTPException(status_code=status_code, detail={"code": code, "message": message})
-
-
-def _ensure_user_can_login(user: dict[str, Any] | None) -> dict[str, Any]:
-    if user is None:
-        _raise_auth_error(status.HTTP_401_UNAUTHORIZED, "AUTH_BAD_CREDENTIALS", "账号或密码错误")
-
-    account_status = user.get("status") or "active"
-    if account_status == "disabled":
-        _raise_auth_error(status.HTTP_403_FORBIDDEN, "AUTH_ACCOUNT_DISABLED", "账号已禁用，请联系管理员")
-    if account_status == "pending":
-        _raise_auth_error(status.HTTP_403_FORBIDDEN, "AUTH_ACCOUNT_PENDING", "账号待审核，暂时无法登录")
-    return user
-
-
-def _fetch_user_by_id(cursor: Any, user_id: int) -> dict[str, Any] | None:
-    cursor.execute(f"SELECT {USER_COLUMNS} FROM users WHERE id = %s", (user_id,))
-    return cursor.fetchone()
-
-
-def _fetch_user_by_login(cursor: Any, login_name: str) -> dict[str, Any] | None:
-    cursor.execute(
-        f"SELECT {USER_COLUMNS} FROM users WHERE username = %s OR email = %s OR phone = %s LIMIT 1",
-        (login_name, login_name, login_name),
-    )
-    return cursor.fetchone()
-
-
-def _touch_last_login(cursor: Any, user_id: int) -> None:
-    cursor.execute("UPDATE users SET last_login_time = %s WHERE id = %s", (datetime.now(), user_id))
-
-
-def _create_user_record(payload: UserCreate, cursor: Any, db: pymysql.connections.Connection) -> dict[str, Any]:
-    if not payload.email:
-        raise HTTPException(status_code=400, detail="邮箱不能为空")
-
-    cursor.execute("SELECT id FROM users WHERE username = %s", (payload.username,))
-    if cursor.fetchone():
-        raise HTTPException(status_code=400, detail="用户名已存在")
-
-    cursor.execute("SELECT id FROM users WHERE email = %s", (payload.email,))
-    if cursor.fetchone():
-        raise HTTPException(status_code=400, detail="邮箱已被注册")
-
-    if payload.phone:
-        cursor.execute("SELECT id FROM users WHERE phone = %s", (payload.phone,))
-        if cursor.fetchone():
-            raise HTTPException(status_code=400, detail="手机号已被注册")
-
-    now = datetime.now()
-    hashed_password = get_password_hash(payload.password)
-    display_name = payload.full_name or payload.username
-
-    cursor.execute(
-        """
-        INSERT INTO users (
-            username, nickname, password_hash, real_name, email, phone, avatar_url,
-            role, department, position, status, join_date, created_at, updated_at
+def _find_login_user(account: str, password: str) -> dict[str, Any] | None:
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                id, username, nickname, real_name, email, phone, avatar_url,
+                role, department, position, status, password_hash
+            FROM users
+            WHERE username = %s OR email = %s
+            LIMIT 1
+            """,
+            (account, account),
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            payload.username,
-            display_name,
-            hashed_password,
-            payload.full_name,
-            payload.email,
-            payload.phone,
-            None,
-            "user",
-            None,
-            None,
-            "active",
-            now.date(),
-            now,
-            now,
-        ),
-    )
-    user_id = cursor.lastrowid
-    db.commit()
-    user = _fetch_user_by_id(cursor, user_id)
-    if user is None:
-        raise HTTPException(status_code=500, detail="用户创建成功但读取失败")
-    return user
+        user = cursor.fetchone()
+        if not user or not verify_password(password, user["password_hash"]):
+            return None
+        return user
+    except pymysql.MySQLError:
+        return None
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
-def _login_request_from_parameters(
-    username: str = Query(..., description="用户名/邮箱/手机号"),
-    password: str = Query(..., description="密码"),
-    rememberMe: bool = Query(False, description="是否记住我"),
-    loginType: str = Query("password", description="登录方式"),
-    deviceId: str | None = Query(None, description="设备标识"),
-    clientType: str | None = Query("web", description="客户端类型"),
-) -> AuthLoginRequest:
-    return AuthLoginRequest(
-        username=username,
-        password=password,
-        rememberMe=rememberMe,
-        loginType=loginType,
-        deviceId=deviceId,
-        clientType=clientType,
-    )
+def _register_db_user(payload: dict[str, Any]) -> str | None:
+    username = payload.get("username") or payload.get("account")
+    password = payload.get("password")
+    if not username or not password:
+        return None
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s LIMIT 1", (username, payload.get("email")))
+        existing = cursor.fetchone()
+        if existing:
+            return str(existing["id"])
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            """
+            INSERT INTO users
+                (username, nickname, password_hash, real_name, email, phone, role, department, status, created_at, updated_at)
+            VALUES
+                (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                username,
+                payload.get("nickname") or payload.get("name") or username,
+                get_password_hash(password),
+                payload.get("name") or payload.get("realName") or username,
+                payload.get("email") or f"{username}@example.local",
+                payload.get("phone"),
+                "user",
+                payload.get("department"),
+                "pending",
+                now,
+                now,
+            ),
+        )
+        user_id = str(cursor.lastrowid)
+        conn.commit()
+        return user_id
+    except pymysql.MySQLError:
+        if conn:
+            conn.rollback()
+        return None
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
+# TODO: 接入真实会话表后，记录登录设备、refresh token 哈希和最后活跃时间。
 @auth_router.post("/login", summary="账号密码登录")
-def auth_login(
-    payload: AuthLoginRequest = Depends(_login_request_from_parameters),
-    db: pymysql.connections.Connection = Depends(get_db),
-):
-    cursor = None
-    try:
-        cursor = db.cursor()
-        user = _ensure_user_can_login(_fetch_user_by_login(cursor, payload.username))
-        if not verify_password(payload.password, user["password_hash"]):
-            _raise_auth_error(status.HTTP_401_UNAUTHORIZED, "AUTH_BAD_CREDENTIALS", "账号或密码错误")
-
-        _touch_last_login(cursor, user["id"])
-        db.commit()
-        return _mock.api_response(_build_auth_payload(user, remember_me=payload.rememberMe))
-    except pymysql.MySQLError as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail={"code": "COMMON_SERVER_ERROR", "message": f"数据库操作失败：{str(e)}"})
-    finally:
-        if cursor:
-            cursor.close()
+def auth_login(payload: dict[str, Any] = Body(...)):
+    username = payload.get("username") or payload.get("account") or "zhanggong"
+    password = payload.get("password") or ""
+    db_user = _find_login_user(username, password)
+    current_user = _db_user_to_current_user(db_user) if db_user else _mock_current_user(username)
+    return _mock.api_response({**_issue_tokens(current_user), "currentUser": current_user})
 
 
-# TODO: 注册页契约确认后，补充 confirmPassword、邀请注册和审核流，并区分 active/pending 两种注册结果。
+# TODO: 映射 RegisterRequest 到 users 表，校验邮箱唯一和 confirmPassword，并返回 pending/active 注册结果。
 @auth_router.post("/register", summary="注册")
-def auth_register(
-    payload: UserCreate,
-    db: pymysql.connections.Connection = Depends(get_db),
-):
-    cursor = None
-    try:
-        cursor = db.cursor()
-        user = _create_user_record(payload, cursor, db)
-        auth_user = _build_auth_user(user)
-        return _mock.api_response(
-            {
-                "userId": auth_user["id"],
-                "status": auth_user["accountStatus"],
-                "profile": {
-                    "name": auth_user["name"],
-                    "department": auth_user["department"],
-                    "email": user.get("email"),
-                    "phone": user.get("phone"),
-                },
-            }
-        )
-    except pymysql.MySQLError as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail={"code": "COMMON_SERVER_ERROR", "message": f"数据库操作失败：{str(e)}"})
-    finally:
-        if cursor:
-            cursor.close()
+def auth_register(payload: dict[str, Any] = Body(...)):
+    password = payload.get("password")
+    confirm_password = payload.get("confirmPassword")
+    if confirm_password is not None and password != confirm_password:
+        raise HTTPException(status_code=400, detail={"code": "PASSWORD_CONFIRM_MISMATCH", "message": "两次输入密码不一致"})
+
+    db_user_id = _register_db_user(payload)
+    return _mock.api_response(
+        {
+            "userId": f"u_{db_user_id}" if db_user_id else _mock.make_id("u"),
+            "status": "pending",
+            "profile": {
+                "account": payload.get("account") or payload.get("username"),
+                "name": payload.get("name"),
+                "email": payload.get("email"),
+                "department": payload.get("department"),
+            },
+        }
+    )
 
 
-@protected_auth_router.get("/me", summary="获取当前用户")
-def get_current_user(
-    token_payload: dict[str, Any] = Depends(require_access_token),
-    db: pymysql.connections.Connection = Depends(get_db),
-):
-    cursor = None
-    try:
-        cursor = db.cursor()
-        user = _fetch_user_by_id(cursor, int(token_payload["sub"]))
-        if user is None:
-            _raise_auth_error(status.HTTP_401_UNAUTHORIZED, "AUTH_TOKEN_INVALID", "登录状态已失效")
-        _ensure_user_can_login(user)
-        auth_user = _build_auth_user(user)
-        return _mock.api_response(
-            {
-                "id": auth_user["id"],
-                "username": auth_user["username"],
-                "name": auth_user["name"],
-                "avatar": auth_user["avatar"],
-                "department": auth_user["department"],
-                "role": auth_user["role"],
-                "roleName": auth_user["roleName"],
-                "nickname": auth_user["nickname"],
-                "position": auth_user["position"],
-                "accountStatus": auth_user["accountStatus"],
-                "permissions": _role_permissions(user.get("role")),
-            }
-        )
-    except pymysql.MySQLError as e:
-        raise HTTPException(status_code=500, detail={"code": "COMMON_SERVER_ERROR", "message": f"数据库操作失败：{str(e)}"})
-    finally:
-        if cursor:
-            cursor.close()
+# TODO: 从 token 解析当前用户，查询最新资料、角色和权限，不再返回静态 CurrentUser。
+@auth_router.get("/me", summary="获取当前用户")
+def get_current_user(authorization: str | None = Header(default=None)):
+    if authorization and authorization.lower().startswith("bearer "):
+        payload = decode_access_token(authorization.split(" ", 1)[1])
+        if payload:
+            current_user = _mock_current_user(payload.get("username"))
+            current_user["id"] = payload.get("sub", current_user["id"])
+            current_user["platformRole"] = payload.get("role", current_user["platformRole"])
+            return _mock.api_response(current_user)
+    return _mock.api_response(_mock.current_user())
 
 
+# TODO: 校验 refreshToken 有效期和撤销状态，签发新 accessToken 并按策略轮换 refreshToken。
 @auth_router.post("/refresh", summary="刷新会话")
-def refresh_session(
-    payload: RefreshTokenRequest,
-    db: pymysql.connections.Connection = Depends(get_db),
-):
-    token_payload = decode_access_token(payload.refreshToken)
-    if token_payload is None:
-        _raise_auth_error(status.HTTP_401_UNAUTHORIZED, "AUTH_TOKEN_INVALID", "refreshToken 无效或已过期")
-    if token_payload.get("token_type") != "refresh":
-        _raise_auth_error(status.HTTP_401_UNAUTHORIZED, "AUTH_TOKEN_INVALID", "refreshToken 类型错误")
-
-    cursor = None
-    try:
-        cursor = db.cursor()
-        user = _fetch_user_by_id(cursor, int(token_payload["sub"]))
-        if user is None:
-            _raise_auth_error(status.HTTP_401_UNAUTHORIZED, "AUTH_TOKEN_INVALID", "登录状态已失效")
-        _ensure_user_can_login(user)
-        remember_me = bool(token_payload.get("remember_me", False))
-        auth_payload = _build_auth_payload(user, remember_me=remember_me)
-        return _mock.api_response(
-            {
-                "accessToken": auth_payload["accessToken"],
-                "refreshToken": auth_payload["refreshToken"],
-                "expiresIn": auth_payload["expiresIn"],
-                "tokenType": auth_payload["tokenType"],
-            }
-        )
-    except pymysql.MySQLError as e:
-        raise HTTPException(status_code=500, detail={"code": "COMMON_SERVER_ERROR", "message": f"数据库操作失败：{str(e)}"})
-    finally:
-        if cursor:
-            cursor.close()
+def refresh_session(payload: dict[str, Any] | None = Body(default=None)):
+    token = (payload or {}).get("refreshToken")
+    decoded = decode_access_token(token) if token else None
+    current_user = _mock_current_user((decoded or {}).get("username"))
+    if decoded and decoded.get("sub"):
+        current_user["id"] = decoded["sub"]
+    return _mock.api_response(_issue_tokens(current_user))
 
 
-@protected_auth_router.post("/logout", summary="退出登录")
-def logout(
-    token_payload: dict[str, Any] = Depends(require_access_token),
-    payload: dict[str, Any] | None = Body(default=None),
-):
-    return _mock.api_response(True)
+# TODO: 撤销当前 refreshToken/会话，记录退出时间，保证重复调用幂等。
+@auth_router.post("/logout", summary="退出登录")
+def logout(payload: dict[str, Any] | None = Body(default=None)):
+    return _mock.api_response({"success": True, "revoked": bool((payload or {}).get("refreshToken")), "loggedOutAt": _mock.now_iso()})
 
 
 # TODO: 从系统配置读取启用的第三方登录提供商，返回授权方式、图标和是否可用。

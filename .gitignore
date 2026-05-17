@@ -42,6 +42,7 @@ env/
 
 # Logs
 *.log
+.backend-dev.*
 
 # Test
 .pytest_cache/
