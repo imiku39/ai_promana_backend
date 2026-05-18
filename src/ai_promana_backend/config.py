@@ -24,14 +24,12 @@ class Settings(BaseSettings):
     @field_validator("DEBUG", mode="before")
     @classmethod
     def parse_debug(cls, value: Any) -> Any:
-        if isinstance(value, bool):
-            return value
         if isinstance(value, str):
             normalized = value.strip().lower()
-            if normalized in {"1", "true", "yes", "on", "debug", "development", "dev"}:
-                return True
-            if normalized in {"0", "false", "no", "off", "release", "production", "prod"}:
+            if normalized in {"release", "prod", "production"}:
                 return False
+            if normalized in {"debug", "dev", "development"}:
+                return True
         return value
     
     @property
