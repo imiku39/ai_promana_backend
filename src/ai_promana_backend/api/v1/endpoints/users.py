@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 import pymysql
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
 from ai_promana_backend.api.v1.endpoints import _mock
 from ai_promana_backend.config import settings
@@ -16,16 +16,8 @@ from ai_promana_backend.core.security import (
     verify_password,
 )
 from ai_promana_backend.database import get_db
-from ai_promana_backend.schemas.user import (
-    AuthLoginRequest,
-    LoginResponse,
-    RefreshTokenRequest,
-    UserCreate,
-    UserLogin,
-    UserOut,
-)
+from ai_promana_backend.schemas.user import AuthLoginRequest, RefreshTokenRequest, UserCreate
 
-router = APIRouter()
 auth_router = APIRouter()
 protected_auth_router = APIRouter()
 
@@ -106,19 +98,6 @@ def _format_date(value: Any) -> str | None:
     if isinstance(value, date):
         return value.isoformat()
     return str(value)
-
-
-def _build_legacy_user_out(user: dict[str, Any]) -> UserOut:
-    return UserOut(
-        id=user["id"],
-        username=user["username"],
-        email=user.get("email"),
-        phone=user.get("phone"),
-        full_name=user.get("real_name"),
-        role=user.get("role", "user"),
-        created_at=_format_datetime(user.get("created_at")) or "",
-        updated_at=_format_datetime(user.get("updated_at")) or "",
-    )
 
 
 def _build_auth_user(user: dict[str, Any]) -> dict[str, Any]:
@@ -248,56 +227,27 @@ def _create_user_record(payload: UserCreate, cursor: Any, db: pymysql.connection
     return user
 
 
-@router.post("/register", response_model=UserOut, summary="用户注册", description="创建新用户账户")
-def register_user(
-    payload: UserCreate,
-    db: pymysql.connections.Connection = Depends(get_db),
-):
-    cursor = None
-    try:
-        cursor = db.cursor()
-        user = _create_user_record(payload, cursor, db)
-        return _build_legacy_user_out(user)
-    except pymysql.MySQLError as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"数据库操作失败：{str(e)}")
-    finally:
-        if cursor:
-            cursor.close()
-
-
-@router.post("/login", response_model=LoginResponse, summary="用户登录", description="用户登录获取访问令牌")
-def login_user(
-    payload: UserLogin,
-    db: pymysql.connections.Connection = Depends(get_db),
-):
-    cursor = None
-    try:
-        cursor = db.cursor()
-        user = _ensure_user_can_login(_fetch_user_by_login(cursor, payload.username))
-        if not verify_password(payload.password, user["password_hash"]):
-            _raise_auth_error(status.HTTP_401_UNAUTHORIZED, "AUTH_BAD_CREDENTIALS", "账号或密码错误")
-
-        _touch_last_login(cursor, user["id"])
-        db.commit()
-
-        return LoginResponse(
-            access_token=create_access_token(
-                data={"sub": user["id"], "username": user["username"], "role": user.get("role", "user")}
-            ),
-            user=_build_legacy_user_out(user),
-        )
-    except pymysql.MySQLError as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"数据库操作失败：{str(e)}")
-    finally:
-        if cursor:
-            cursor.close()
+def _login_request_from_parameters(
+    username: str = Query(..., description="用户名/邮箱/手机号"),
+    password: str = Query(..., description="密码"),
+    rememberMe: bool = Query(False, description="是否记住我"),
+    loginType: str = Query("password", description="登录方式"),
+    deviceId: str | None = Query(None, description="设备标识"),
+    clientType: str | None = Query("web", description="客户端类型"),
+) -> AuthLoginRequest:
+    return AuthLoginRequest(
+        username=username,
+        password=password,
+        rememberMe=rememberMe,
+        loginType=loginType,
+        deviceId=deviceId,
+        clientType=clientType,
+    )
 
 
 @auth_router.post("/login", summary="账号密码登录")
 def auth_login(
-    payload: AuthLoginRequest,
+    payload: AuthLoginRequest = Depends(_login_request_from_parameters),
     db: pymysql.connections.Connection = Depends(get_db),
 ):
     cursor = None

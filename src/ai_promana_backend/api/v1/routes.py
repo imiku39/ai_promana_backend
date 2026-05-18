@@ -1,4 +1,3 @@
-# TODO: 后续真实服务接入后，统一梳理 /api 与 /api/v1 的版本策略、tags 和兼容路由保留周期。
 from fastapi import APIRouter, Security
 
 from ai_promana_backend.api.v1.endpoints import (
@@ -26,7 +25,6 @@ from ai_promana_backend.core.security import require_access_token
 router = APIRouter()
 public_api_router = APIRouter(prefix="/api")
 protected_api_router = APIRouter(prefix="/api", dependencies=[Security(require_access_token)])
-legacy_router = APIRouter(prefix="/api/v1")
 
 public_api_router.include_router(users.auth_router, prefix="/auth", tags=["认证"])
 
@@ -60,8 +58,5 @@ protected_api_router.include_router(teams.router, prefix="/teams", tags=["团队
 protected_api_router.include_router(operation_logs.router, prefix="/operation-logs", tags=["操作日志"])
 protected_api_router.include_router(managments.router, prefix="/management", tags=["管理选项"])
 
-legacy_router.include_router(users.router, prefix="/users", tags=["用户管理"])
-
 router.include_router(public_api_router)
 router.include_router(protected_api_router)
-router.include_router(legacy_router)
