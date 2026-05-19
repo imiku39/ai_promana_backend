@@ -1,4 +1,5 @@
 ﻿# TODO: 后续新增或拆分 endpoint 模块时，同步维护这里的导入和 __all__ 导出列表。
+# `api/v1/endpoints` 是接口标准目录；新增或拆分模块时，同步维护这里的导入和 __all__ 导出列表。
 from . import (
     admin,
     daily_reports,

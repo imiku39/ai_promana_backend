@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from ai_promana_backend.api.v1.endpoints import _mock
+from ai_promana_backend.schemas.request_bodies import AiApplyRequest, DependenciesSaveRequest, ScheduleItemUpdateRequest, body_to_dict
 
 
 router = APIRouter()
@@ -63,9 +64,10 @@ def get_project_gantt_page(projectId: str):
 
 
 @router.patch("/{projectId}/schedule/items/{itemId}", summary="更新排期")
-def update_schedule_item(projectId: str, itemId: str, payload: dict[str, Any] = Body(...)):
-    planned_start = payload.get("plannedStart") or payload.get("startDate")
-    planned_end = payload.get("plannedEnd") or payload.get("endDate")
+def update_schedule_item(projectId: str, itemId: str, payload: ScheduleItemUpdateRequest):
+    body = body_to_dict(payload)
+    planned_start = body.get("plannedStart") or body.get("startDate")
+    planned_end = body.get("plannedEnd") or body.get("endDate")
     if planned_start and planned_end and _safe_date(planned_start) > _safe_date(planned_end):
         raise HTTPException(status_code=400, detail={"code": "SCHEDULE_DATE_INVALID", "message": "结束日期需晚于开始日期"})
     delay_days = _delay_days(planned_end or _mock.today(), _baseline_end_for_item(itemId))
@@ -75,9 +77,9 @@ def update_schedule_item(projectId: str, itemId: str, payload: dict[str, Any] = 
             "itemId": itemId,
             "plannedStart": planned_start,
             "plannedEnd": planned_end,
-            "ownerId": payload.get("ownerId"),
+            "ownerId": body.get("ownerId"),
             "delayDays": delay_days,
-            "version": int(payload.get("version", 1)) + 1,
+            "version": int(body.get("version", 1)) + 1,
             "affectedDependencies": ["task_004"] if delay_days > 0 else [],
             "updatedAt": _mock.now_iso(),
         }
@@ -95,8 +97,9 @@ def get_project_dependencies(projectId: str):
 
 
 @router.put("/{projectId}/dependencies", summary="保存任务依赖")
-def save_project_dependencies(projectId: str, payload: dict[str, Any] = Body(...)):
-    dependencies = payload.get("dependencies", [])
+def save_project_dependencies(projectId: str, payload: DependenciesSaveRequest):
+    body = body_to_dict(payload)
+    dependencies = body.get("dependencies", [])
     if _has_self_dependency(dependencies):
         raise HTTPException(status_code=400, detail={"code": "DEPENDENCY_CYCLE_DETECTED", "message": "依赖关系不能指向自身"})
     return _mock.api_response(
@@ -104,7 +107,7 @@ def save_project_dependencies(projectId: str, payload: dict[str, Any] = Body(...
             "projectId": projectId,
             "dependencies": dependencies,
             "dependencyCount": len(dependencies),
-            "version": int(payload.get("version", 1)) + 1,
+            "version": int(body.get("version", 1)) + 1,
             "updatedAt": _mock.now_iso(),
         }
     )
@@ -126,8 +129,8 @@ def get_project_schedule_suggestions(
 
 
 @ai_router.post("/project-schedule-suggestions/{suggestionId}/apply", summary="采纳 AI 排期建议")
-def apply_project_schedule_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    body = payload or {}
+def apply_project_schedule_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "suggestionId": suggestionId,

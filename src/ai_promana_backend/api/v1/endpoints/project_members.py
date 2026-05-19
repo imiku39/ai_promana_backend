@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 
 from ai_promana_backend.api.v1.endpoints import _mock
+from ai_promana_backend.schemas.request_bodies import AiApplyRequest, MemberInviteRequest, MemberUpdateRequest, body_to_dict
 
 
 router = APIRouter()
@@ -28,7 +29,7 @@ JOIN_STATUS_LABELS = {
 }
 
 
-# TODO: 查询项目成员、角色分布、工作负载热力图和邀请配置，校验 project:member:read。
+# TODO: 查询项目成员、角色分布和邀请配置，校验 project:member:read。
 @router.get("/{projectId}/members/page-data", summary="成员页聚合数据")
 def get_project_members_page(projectId: str):
     members = [_member_item(item) for item in _mock.members()]
@@ -41,10 +42,8 @@ def get_project_members_page(projectId: str):
             "inviteFlow": {
                 "steps": ["select-user", "assign-role", "send-notice"],
                 "defaultRole": "dev",
-                "notifyChannels": ["in_app", "wecom", "email"],
+                "notifyChannels": ["in_app", "wecom"],
             },
-            "heatmap": _workload_heatmap_rows(members)["rows"],
-            "workloadHeatmap": _workload_heatmap_rows(members),
             "filters": {
                 "roles": [
                     {"value": "pm", "label": "PM"},
@@ -128,8 +127,7 @@ def search_member_candidates(
         candidates = [
             item
             for item in candidates
-            if lowered in item["name"].lower() or lowered in item["email"].lower()
-            or lowered in item["department"].lower()
+            if lowered in item["name"].lower() or lowered in item["department"].lower()
         ]
     data = _mock.paged(candidates, page, pageSize)
     data["pagination"] = {"page": data["page"], "pageSize": data["pageSize"], "total": data["total"]}
@@ -138,9 +136,13 @@ def search_member_candidates(
 
 # TODO: 创建成员邀请记录，校验角色模板和重复邀请，并发送站内/企业微信通知。
 @router.post("/{projectId}/member-invitations", summary="邀请成员")
-def invite_project_members(projectId: str, payload: dict[str, Any] = Body(...)):
-    user_ids = payload.get("userIds") or payload.get("memberIds") or []
-    project_role = payload.get("projectRole") or payload.get("role") or "dev"
+def invite_project_members(projectId: str, payload: MemberInviteRequest):
+    body = body_to_dict(payload)
+    user_ids = body.get("userIds") or body.get("memberIds") or []
+    project_role = body.get("projectRole") or body.get("role") or "dev"
+    notify_channels = body.get("notifyChannels", ["in_app"])
+    if isinstance(notify_channels, list):
+        notify_channels = [channel for channel in notify_channels if channel != "email"] or ["in_app"]
     return _mock.api_response(
         {
             "projectId": projectId,
@@ -150,8 +152,8 @@ def invite_project_members(projectId: str, payload: dict[str, Any] = Body(...)):
             "memberIds": user_ids,
             "projectRole": project_role,
             "role": project_role,
-            "message": payload.get("message"),
-            "notifyChannels": payload.get("notifyChannels", ["in_app"]),
+            "message": body.get("message"),
+            "notifyChannels": notify_channels,
             "status": "sent",
             "createdAt": _mock.now_iso(),
         }
@@ -160,8 +162,9 @@ def invite_project_members(projectId: str, payload: dict[str, Any] = Body(...)):
 
 # TODO: 更新成员项目角色或状态，防止移除唯一项目负责人，并刷新项目权限缓存。
 @router.patch("/{projectId}/members/{memberId}", summary="调整成员角色/状态")
-def update_project_member(projectId: str, memberId: str, payload: dict[str, Any] = Body(...)):
-    project_role = payload.get("projectRole") or payload.get("role") or "dev"
+def update_project_member(projectId: str, memberId: str, payload: MemberUpdateRequest):
+    body = body_to_dict(payload)
+    project_role = body.get("projectRole") or body.get("role") or "dev"
     _, role_label, role_name = ROLE_LABELS.get(project_role, (project_role, project_role, project_role))
     return _mock.api_response(
         {
@@ -170,9 +173,9 @@ def update_project_member(projectId: str, memberId: str, payload: dict[str, Any]
             "role": role_name,
             "projectRole": project_role,
             "roleLabel": role_label,
-            "status": payload.get("status", "active"),
-            "joinStatus": payload.get("joinStatus", "joined"),
-            "version": payload.get("version", 1) + 1,
+            "status": body.get("status", "active"),
+            "joinStatus": body.get("joinStatus", "joined"),
+            "version": body.get("version", 1) + 1,
             "updatedAt": _mock.now_iso(),
         }
     )
@@ -198,12 +201,13 @@ def get_project_member_suggestions(projectId: str | None = Query(default=None)):
 
 
 @ai_router.post("/project-member-suggestions/{suggestionId}/apply", summary="采纳 AI 成员建议")
-def apply_project_member_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
+def apply_project_member_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "suggestionId": suggestionId,
             "applied": True,
-            "adjustments": (payload or {}).get("adjustments", []),
+            "adjustments": body.get("adjustments", []),
             "resultMessage": "已生成成员负载调整建议，并同步到项目成员页。",
             "appliedAt": _mock.now_iso(),
         }

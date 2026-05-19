@@ -4,6 +4,14 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from ai_promana_backend.api.v1.endpoints import _mock
+from ai_promana_backend.schemas.request_bodies import (
+    AiApplyRequest,
+    ExportRequest,
+    NotificationHandleRequest,
+    NotificationPreferencesUpdateRequest,
+    NotificationReadBatchRequest,
+    body_to_dict,
+)
 
 
 router = APIRouter()
@@ -119,9 +127,10 @@ def list_notifications(
 
 
 @router.post("/read-batch", summary="批量已读")
-def mark_notifications_read_batch(payload: dict[str, Any] = Body(...)):
-    ids = payload.get("notificationIds", [])
-    if not ids and payload.get("scope") not in {"all", "current_filter"}:
+def mark_notifications_read_batch(payload: NotificationReadBatchRequest):
+    body = body_to_dict(payload)
+    ids = body.get("notificationIds", [])
+    if not ids and body.get("scope") not in {"all", "current_filter"}:
         ids = [item["id"] for item in _notification_items() if item["unread"]]
     return _mock.api_response(
         {
@@ -150,7 +159,7 @@ def get_notification_entry_guide():
             },
             {
                 "title": "通道配置",
-                "description": "管理员可在后台系统配置站内、邮件和企业微信通知。",
+                "description": "管理员可在后台系统配置站内和企业微信通知。",
                 "targetPath": "/admin/system",
                 "actionLabel": "查看通道",
             },
@@ -159,10 +168,11 @@ def get_notification_entry_guide():
 
 
 @router.post("/export", summary="导出通知记录")
-def export_notifications(payload: dict[str, Any] | None = Body(default=None)):
+def export_notifications(payload: ExportRequest | None = None):
+    body = body_to_dict(payload)
     task = _mock.export_task("notification_export")
-    task["filters"] = payload or {}
-    task["fileType"] = (payload or {}).get("fileType", "xlsx")
+    task["filters"] = body or {}
+    task["fileType"] = body.get("fileType", "xlsx")
     return _mock.api_response(task)
 
 
@@ -188,11 +198,12 @@ def mark_notification_read(notificationId: str):
 
 
 @router.post("/{notificationId}/handle", summary="处理通知动作")
-def handle_notification(notificationId: str, payload: dict[str, Any] = Body(default_factory=dict)):
+def handle_notification(notificationId: str, payload: NotificationHandleRequest | None = None):
+    body = body_to_dict(payload)
     item = next((notice for notice in _notification_items() if notice["id"] == notificationId), None)
     if not item:
         raise HTTPException(status_code=404, detail={"code": "NOTIFICATION_NOT_FOUND", "message": "通知不存在"})
-    action_key = payload.get("actionKey") or payload.get("action") or item["actionType"]
+    action_key = body.get("actionKey") or body.get("action") or item["actionType"]
     return _mock.api_response(
         {
             "id": notificationId,
@@ -203,7 +214,7 @@ def handle_notification(notificationId: str, payload: dict[str, Any] = Body(defa
             "statusCode": "completed",
             "handledAt": _mock.now_iso(),
             "targetPath": item.get("actionPath"),
-            "remark": payload.get("remark"),
+            "remark": body.get("remark"),
         }
     )
 
@@ -214,8 +225,10 @@ def get_notification_preferences():
 
 
 @preferences_router.put("/me", summary="保存通知偏好")
-def update_notification_preferences(payload: dict[str, Any] = Body(...)):
-    return _mock.api_response({**_notification_preferences(), **payload, "updatedAt": _mock.now_iso(), "saved": True})
+def update_notification_preferences(payload: NotificationPreferencesUpdateRequest):
+    body = body_to_dict(payload)
+    body = _sanitize_notification_preferences_payload(body)
+    return _mock.api_response({**_notification_preferences(), **body, "updatedAt": _mock.now_iso(), "saved": True})
 
 
 @ai_router.get("/notification-suggestions", summary="AI 通知建议")
@@ -254,8 +267,8 @@ def get_ai_notification_suggestions(
 
 
 @ai_router.post("/notification-suggestions/{suggestionId}/apply", summary="采纳 AI 通知建议")
-def apply_ai_notification_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    body = payload or {}
+def apply_ai_notification_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "suggestionId": suggestionId,
@@ -441,12 +454,11 @@ def _notification_detail(item: dict[str, Any]) -> dict[str, Any]:
 def _notification_preferences() -> dict[str, Any]:
     return {
         "inAppEnabled": True,
-        "emailEnabled": True,
         "enterpriseWechatEnabled": False,
         "taskStatus": True,
         "logFeedback": True,
         "reportSubscription": False,
-        "channels": {"inApp": True, "email": True, "wecom": False},
+        "channels": {"inApp": True, "wecom": False},
         "categories": {
             "pending": True,
             "system": True,
@@ -461,6 +473,16 @@ def _notification_preferences() -> dict[str, Any]:
         "updatedAt": _mock.now_iso(),
         "version": 3,
     }
+
+
+def _sanitize_notification_preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    body = {key: value for key, value in payload.items() if key != "email"}
+    channels = body.get("channels")
+    if isinstance(channels, dict):
+        body["channels"] = {key: value for key, value in channels.items() if key != "email"}
+    elif isinstance(channels, list):
+        body["channels"] = [channel for channel in channels if channel.get("channel") != "email"]
+    return body
 
 
 def _plain_query_value(value: Any, default: Any = None) -> Any:
