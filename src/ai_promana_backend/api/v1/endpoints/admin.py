@@ -1,9 +1,14 @@
 ﻿# TODO: 后台管理接口当前为首版联调实现，后续接入 admin service、权限校验、审计记录和真实错误码。
 from typing import Any
 
-from fastapi import APIRouter, Body, Query, UploadFile, File
+from fastapi import APIRouter, Query, UploadFile, File
 
 from ai_promana_backend.api.v1.endpoints import _mock
+from ai_promana_backend.schemas.request_bodies import (
+    AiApplyRequest,
+    AdminUserRequest,
+    body_to_dict,
+)
 
 
 router = APIRouter()
@@ -84,7 +89,6 @@ def list_admin_users(
             item
             for item in users
             if lowered in item["name"].lower()
-            or lowered in item["email"].lower()
             or lowered in item["departmentName"].lower()
         ]
     if selected_role:
@@ -119,57 +123,35 @@ def get_admin_user_create_options():
     )
 
 
-# TODO: 校验邮箱唯一性和角色合法性，写入 users 表，生成初始激活状态并发送邀请/激活通知。
+# TODO: 校验角色合法性，写入 users 表，生成初始激活状态并发送邀请/激活通知。
 @router.post("/users", summary="创建用户")
-def create_admin_user(payload: dict[str, Any] = Body(...)):
-    user = _admin_user_from_payload(payload, user_id=_mock.make_id("user"))
+def create_admin_user(payload: AdminUserRequest):
+    body = body_to_dict(payload)
+    user = _admin_user_from_payload(body, user_id=_mock.make_id("user"))
     return _mock.api_response(
         {
             "id": user["id"],
             "status": user["status"],
-            "inviteSent": bool(payload.get("sendInvite", True)),
+            "inviteSent": bool(body.get("sendInvite", True)),
             "createdAt": _mock.now_iso(),
             "user": user,
         }
     )
 
 
-# TODO: 仅允许更新白名单字段，校验邮箱/部门/角色变更规则，并记录修改前后的审计日志。
+# TODO: 仅允许更新白名单字段，校验部门/角色变更规则，并记录修改前后的审计日志。
 @router.patch("/users/{userId}", summary="编辑用户资料")
-def update_admin_user(userId: str, payload: dict[str, Any] = Body(...)):
-    user = _admin_user_from_payload(payload, user_id=userId)
-    user["version"] = int(payload.get("version", 1)) + 1
+def update_admin_user(userId: str, payload: AdminUserRequest):
+    body = body_to_dict(payload)
+    user = _admin_user_from_payload(body, user_id=userId)
+    user["version"] = int(body.get("version", 1)) + 1
     user["updatedAt"] = _mock.now_iso()
     return _mock.api_response({"user": user})
 
 
 @router.put("/users/{userId}", summary="更新用户")
-def replace_admin_user(userId: str, payload: dict[str, Any] = Body(...)):
+def replace_admin_user(userId: str, payload: AdminUserRequest):
     return update_admin_user(userId, payload)
-
-
-# TODO: 实现 pending/active/disabled 状态机，停用用户时同步失效会话和项目权限缓存。
-@router.patch("/users/{userId}/status", summary="激活/停用用户")
-def update_admin_user_status(userId: str, payload: dict[str, Any] = Body(...)):
-    status = payload.get("status", "active")
-    return _mock.api_response(
-        {
-            "userId": userId,
-            "status": status,
-            "statusLabel": _status_label(status),
-            "updatedAt": _mock.now_iso(),
-        }
-    )
-
-
-@router.post("/users/{userId}/activate", summary="激活用户")
-def activate_admin_user(userId: str):
-    return update_admin_user_status(userId, {"status": "active"})
-
-
-@router.post("/users/{userId}/disable", summary="停用用户")
-def disable_admin_user(userId: str):
-    return update_admin_user_status(userId, {"status": "disabled"})
 
 
 # TODO: 返回真实模板文件或流式下载响应，模板字段需与导入解析器保持一致。
@@ -183,12 +165,7 @@ def get_user_import_template():
     )
 
 
-@router.get("/users/import-template", summary="下载用户导入模板")
-def get_user_import_template_compat():
-    return get_user_import_template()
-
-
-# TODO: 解析上传 Excel，逐行校验邮箱、角色、部门和重复数据，返回可确认导入的临时批次 ID。
+# TODO: 解析上传 Excel，逐行校验角色、部门和重复数据，返回可确认导入的临时批次 ID。
 @router.post("/users/import/preview", summary="上传并预览导入")
 def preview_user_import(file: UploadFile = File(...)):
     return _mock.api_response(
@@ -202,7 +179,6 @@ def preview_user_import(file: UploadFile = File(...)):
                 {
                     "rowNo": 2,
                     "name": "Zhao Manager",
-                    "email": "zhao@example.com",
                     "department": "Product",
                     "departmentName": "Product",
                     "roleKey": "user",
@@ -216,32 +192,15 @@ def preview_user_import(file: UploadFile = File(...)):
     )
 
 
-# TODO: 根据预览批次落库用户数据，跳过无效行并返回创建、更新、失败明细。
-@router.post("/users/import/commit", summary="确认导入")
-def commit_user_import(payload: dict[str, Any] = Body(...)):
-    rows = payload.get("rows", [])
-    created_count = len(rows) if rows else 3
-    return _mock.api_response({"createdCount": created_count, "updatedCount": 0, "skippedCount": 0, "failedCount": 0, "fileName": payload.get("fileName")})
-
-
-@router.post("/users/import/confirm", summary="确认批量导入用户")
-def confirm_user_import(payload: dict[str, Any] = Body(...)):
-    return commit_user_import(payload)
-
-
-@router.get("/ai-suggestions", summary="后台 AI 建议")
-def get_admin_ai_suggestions():
-    return get_ai_admin_suggestions()
-
-
 @router.post("/ai-suggestions/{suggestionId}/apply", summary="应用 AI 管理建议")
-def apply_admin_ai_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
+def apply_admin_ai_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
     return apply_ai_admin_suggestion(suggestionId, payload)
 
 
 @router.post("/ai-suggestions/{suggestionId}/defer", summary="稍后处理 AI 管理建议")
-def defer_admin_ai_suggestion_admin(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    return _mock.api_response({"suggestionId": suggestionId, "deferred": True, "payload": payload or {}, "deferredAt": _mock.now_iso()})
+def defer_admin_ai_suggestion_admin(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
+    return _mock.api_response({"suggestionId": suggestionId, "deferred": True, "payload": body, "deferredAt": _mock.now_iso()})
 
 
 # TODO: 汇总管理员待处理事项、权限异常和系统配置风险，调用 AI 服务生成可执行建议。
@@ -252,23 +211,20 @@ def get_ai_admin_suggestions():
 
 # TODO: 按 suggestionId 执行建议动作，例如跳转配置、创建审计任务或批量修复权限，并记录采纳结果。
 @ai_router.post("/admin-suggestions/{suggestionId}/apply", summary="采纳后台 AI 建议")
-def apply_ai_admin_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    return _mock.api_response({"suggestionId": suggestionId, "applied": True, "payload": payload or {}})
-
-
-@ai_router.get("/ai-suggestions", summary="后台 AI 建议兼容")
-def get_admin_ai_suggestions_compat():
-    return get_ai_admin_suggestions()
+def apply_ai_admin_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
+    return _mock.api_response({"suggestionId": suggestionId, "applied": True, "payload": body})
 
 
 @ai_router.post("/ai-suggestions/{suggestionId}/apply", summary="应用 AI 管理建议兼容")
-def apply_admin_ai_suggestion_compat(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
+def apply_admin_ai_suggestion_compat(suggestionId: str, payload: AiApplyRequest | None = None):
     return apply_ai_admin_suggestion(suggestionId, payload)
 
 
 @ai_router.post("/ai-suggestions/{suggestionId}/defer", summary="稍后处理 AI 管理建议")
-def defer_admin_ai_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    return _mock.api_response({"suggestionId": suggestionId, "deferred": True, "payload": payload or {}, "deferredAt": _mock.now_iso()})
+def defer_admin_ai_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
+    return _mock.api_response({"suggestionId": suggestionId, "deferred": True, "payload": body, "deferredAt": _mock.now_iso()})
 
 
 def audit_items() -> list[dict[str, Any]]:
@@ -317,7 +273,7 @@ def _admin_user_from_payload(payload: dict[str, Any], user_id: str) -> dict[str,
     return {
         "id": user_id,
         "name": payload.get("name", "未命名用户"),
-        "email": payload.get("email", "user@example.com"),
+        "phone": payload.get("phone"),
         "departmentId": payload.get("departmentId") or _department_id(department_name),
         "departmentName": department_name,
         "department": department_name,

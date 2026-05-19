@@ -103,7 +103,7 @@ def export_morning_report(payload: dict[str, Any] | None = Body(default=None)):
     return _mock.api_response(task)
 
 
-# TODO: 按 projectId 聚合燃尽、工时、缺陷、阻塞负载和 AI 洞察，校验 project:report:read 权限。
+# TODO: 按 projectId 聚合燃尽、工时、缺陷和 AI 洞察，校验 project:report:read 权限。
 @project_router.get("/{projectId}/reports/page-data", summary="项目报表聚合数据")
 def get_project_reports_page(projectId: str):
     overview = _project_report_overview(projectId)
@@ -159,11 +159,6 @@ def get_project_report_work_hours(projectId: str, memberId: str | None = Query(d
 @project_router.get("/{projectId}/reports/bugs", summary="项目 Bug 趋势")
 def get_project_report_bugs(projectId: str, period: str | None = Query(default="last_30_days")):
     return _mock.api_response(_project_report_bugs(projectId, _plain_query_value(period, "last_30_days")))
-
-
-@project_router.get("/{projectId}/reports/block-load", summary="项目阻塞与负载")
-def get_project_report_block_load(projectId: str):
-    return _mock.api_response(_project_report_block_load(projectId))
 
 
 # TODO: 创建项目报表导出任务，记录筛选条件、导出人和 projectId，返回可追踪 taskId。
@@ -223,21 +218,6 @@ def get_global_project_health(
     project_ids = set(filters["projectIds"])
     if project_ids:
         items = [item for item in items if item["projectId"] in project_ids]
-    return _mock.api_response(items)
-
-
-@reports_router.get("/global/resource-load", summary="成员/资源负载分布")
-def get_global_resource_load(
-    startDate: str | None = Query(default=None),
-    endDate: str | None = Query(default=None),
-    resourceType: str | None = Query(default=None),
-    departmentIds: str | None = Query(default=None),
-    projectIds: str | None = Query(default=None),
-):
-    items = _global_resource_load()
-    resource_type = _plain_query_value(resourceType)
-    if resource_type and resource_type != "all":
-        items = [item for item in items if item["resourceType"] == resource_type]
     return _mock.api_response(items)
 
 
@@ -347,17 +327,6 @@ def get_reports_options():
     return _mock.api_response(_global_report_options())
 
 
-# TODO: 创建全局报表导出任务，校验 report:export 权限并限制导出范围为当前用户可见数据。
-@reports_router.post("/export", summary="导出全局报表")
-def export_global_report(payload: dict[str, Any] | None = Body(default=None)):
-    task = _mock.export_task("global_report_export")
-    task["exportTaskId"] = task["taskId"]
-    task["status"] = "processing"
-    task["filters"] = payload or {}
-    task["format"] = (payload or {}).get("format", "xlsx")
-    return _mock.api_response(task)
-
-
 # TODO: 将报表异常、趋势变化和用户筛选条件提交给 AI 服务，返回可采纳的分析建议。
 @ai_router.get("/report-suggestions", summary="全局报表 AI 建议")
 def get_ai_report_suggestions():
@@ -450,7 +419,7 @@ def _project_report_options(project_id: str) -> dict[str, Any]:
             {"value": "work_hours", "label": "工时报表"},
             {"value": "quality", "label": "质量报表"},
         ],
-        "metrics": ["progress", "work_hours", "bugs", "block_load"],
+        "metrics": ["progress", "work_hours", "bugs"],
         "exportFormats": ["markdown", "pdf", "xlsx"],
         "defaultValues": {"period": "last_30_days", "memberId": "all", "reportTypes": ["progress", "work_hours", "quality"]},
     }
@@ -467,7 +436,6 @@ def _project_report_overview(
         "burndown": _project_report_burndown(project_id, period),
         "workHours": _project_report_work_hours(project_id, member_id),
         "bugs": _project_report_bugs(project_id, period),
-        "blockLoad": _project_report_block_load(project_id),
         "filters": {
             "period": period or "last_30_days",
             "memberId": member_id or "all",
@@ -522,14 +490,6 @@ def _project_report_bugs(project_id: str, period: str | None) -> list[dict[str, 
     ]
 
 
-def _project_report_block_load(project_id: str) -> list[dict[str, Any]]:
-    return [
-        {"label": "联调环境", "value": 78, "displayValue": "31h", "type": "block_hours", "level": "danger", "projectId": project_id},
-        {"label": "QA 评审", "value": 62, "displayValue": "18h", "type": "review_load", "level": "warning", "projectId": project_id},
-        {"label": "平台支持", "value": 44, "displayValue": "12h", "type": "resource_load", "level": "primary", "projectId": project_id},
-    ]
-
-
 def _global_report_filters(
     start_date: str | None,
     end_date: str | None,
@@ -548,21 +508,17 @@ def _global_report_filters(
 
 def _global_report_overview(filters: dict[str, Any]) -> dict[str, Any]:
     project_health = _global_project_health()
-    resource_load = _global_resource_load()
     keyword = filters.get("keyword")
     if keyword:
         lowered = str(keyword).lower()
         project_health = [item for item in project_health if lowered in item["projectName"].lower()]
-        resource_load = [item for item in resource_load if lowered in item["resourceName"].lower()]
     return {
         "currentUser": _mock.current_user(),
         "unreadCount": len([item for item in _mock.notifications() if not item["read"]]),
         "aiInsight": _global_ai_insight(),
         "projectHealth": project_health,
-        "resourceLoad": resource_load,
         "summary": {
             "averageHealthScore": round(sum(item["healthScore"] for item in project_health) / max(len(project_health), 1), 1),
-            "overloadedResourceCount": len([item for item in resource_load if item["loadLevel"] == "danger"]),
             "reportGeneratedAt": _mock.now_iso(),
         },
         "filters": filters,
@@ -575,8 +531,6 @@ def _global_ai_insight() -> dict[str, Any]:
         "title": "本周团队整体效率提升 9%，但 3 个项目共享同一 QA 资源，存在下周资源冲突风险。",
         "content": "建议从全局层面优先平衡 QA 资源窗口，并提前对联调验证、自动化巡检和协议升级三条线做时间切分。",
         "efficiencyGrowthRate": 9,
-        "conflictProjectCount": 3,
-        "conflictResource": "QA",
         "generatedAt": _mock.now_iso(),
         "actions": [
             {"key": "generate_management_weekly", "label": "生成管理周报"},
@@ -598,41 +552,6 @@ def _global_project_health() -> list[dict[str, Any]]:
             "progress": item.get("progress", 0),
         }
         for item in _mock.projects()
-    ]
-
-
-def _global_resource_load() -> list[dict[str, Any]]:
-    return [
-        {
-            "resourceId": "resource_qa",
-            "resourceName": "QA 资源",
-            "resourceType": "role_group",
-            "loadRate": 89,
-            "loadLevel": "danger",
-            "projectCount": 3,
-            "taskCount": 18,
-            "conflictWindow": "下周一至周三",
-        },
-        {
-            "resourceId": "team_platform",
-            "resourceName": "平台组",
-            "resourceType": "team",
-            "loadRate": 78,
-            "loadLevel": "warning",
-            "projectCount": 4,
-            "taskCount": 31,
-            "conflictWindow": "本周四",
-        },
-        {
-            "resourceId": "u_10002",
-            "resourceName": "Chen Siyuan",
-            "resourceType": "member",
-            "loadRate": 68,
-            "loadLevel": "success",
-            "projectCount": 2,
-            "taskCount": 11,
-            "conflictWindow": None,
-        },
     ]
 
 
@@ -664,7 +583,7 @@ def _global_report_suggestion_card() -> dict[str, Any]:
     return {
         "suggestionId": "sug_global_report_001",
         "title": "全局建议",
-        "content": "建议从下周一开始冻结 QA 的跨项目时段，避免 3 个高优先级项目在同一时间抢占验证资源。",
+        "content": "建议从下周一开始优先固定关键协作窗口，并提前安排管理周报的节奏和责任人。",
         "actions": [
             {"key": "generate_management_weekly", "label": "生成管理周报"},
             {"key": "create_resource_reminder", "label": "生成资源提醒"},

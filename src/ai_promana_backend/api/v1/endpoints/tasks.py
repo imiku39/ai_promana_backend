@@ -5,6 +5,16 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from ai_promana_backend.api.v1.endpoints import _mock
+from ai_promana_backend.schemas.request_bodies import (
+    AiApplyRequest,
+    KanbanOrderRequest,
+    SubtaskCreateRequest,
+    SubtaskUpdateRequest,
+    TaskCommentRequest,
+    TaskTransitionRequest,
+    TaskWriteRequest,
+    body_to_dict,
+)
 
 
 router = APIRouter()
@@ -107,8 +117,8 @@ PRIORITY_STYLE = {
 
 
 @router.post("/drafts", summary="保存任务草稿")
-def save_task_draft(payload: dict[str, Any] = Body(...)):
-    draft = _normalize_task_payload(payload)
+def save_task_draft(payload: TaskWriteRequest):
+    draft = _normalize_task_payload(body_to_dict(payload))
     return _mock.api_response(
         {
             "draftId": _mock.make_id("task_draft"),
@@ -120,8 +130,8 @@ def save_task_draft(payload: dict[str, Any] = Body(...)):
 
 
 @router.post("", summary="创建任务")
-def create_task(payload: dict[str, Any] = Body(...)):
-    task = _task_from_payload(payload)
+def create_task(payload: TaskWriteRequest):
+    task = _task_from_payload(body_to_dict(payload))
     return _mock.api_response({"taskId": task["id"], "task": _task_detail(task)})
 
 
@@ -132,8 +142,8 @@ def get_task_detail(taskId: str):
 
 
 @router.put("/{taskId}", summary="更新任务")
-def replace_task(taskId: str, payload: dict[str, Any] = Body(...)):
-    task = _task_detail(_merge_task_payload(taskId, payload))
+def replace_task(taskId: str, payload: TaskWriteRequest):
+    task = _task_detail(_merge_task_payload(taskId, body_to_dict(payload)))
     return _mock.api_response(
         {
             "taskId": taskId,
@@ -145,8 +155,8 @@ def replace_task(taskId: str, payload: dict[str, Any] = Body(...)):
 
 
 @router.patch("/{taskId}", summary="更新任务字段")
-def update_task(taskId: str, payload: dict[str, Any] = Body(...)):
-    task = _task_detail(_merge_task_payload(taskId, payload))
+def update_task(taskId: str, payload: TaskWriteRequest):
+    task = _task_detail(_merge_task_payload(taskId, body_to_dict(payload)))
     return _mock.api_response({"task": task})
 
 
@@ -189,8 +199,8 @@ def get_task_transition_options(taskId: str):
 
 
 @router.post("/{taskId}/transition", summary="任务状态流转")
-def transition_task(taskId: str, payload: dict[str, Any] = Body(...)):
-    return _mock.api_response(_transition_payload(task_id=taskId, project_id=None, payload=payload))
+def transition_task(taskId: str, payload: TaskTransitionRequest):
+    return _mock.api_response(_transition_payload(task_id=taskId, project_id=None, payload=body_to_dict(payload)))
 
 
 @router.get("/{taskId}/comments", summary="获取评论列表")
@@ -218,8 +228,9 @@ def list_task_comments(
 
 
 @router.post("/{taskId}/comments", summary="添加评论")
-def add_task_comment(taskId: str, payload: dict[str, Any] = Body(...)):
-    content = str(payload.get("content") or "").strip()
+def add_task_comment(taskId: str, payload: TaskCommentRequest):
+    body = body_to_dict(payload)
+    content = str(body.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail={"code": "COMMENT_CONTENT_INVALID", "message": "请输入评论内容"})
     comment = {
@@ -227,7 +238,7 @@ def add_task_comment(taskId: str, payload: dict[str, Any] = Body(...)):
         "taskId": taskId,
         "author": _comment_author(_mock.current_user()),
         "content": content,
-        "mentionedUserIds": payload.get("mentionedUserIds", []),
+        "mentionedUserIds": body.get("mentionedUserIds", []),
         "createdAt": _mock.now_iso(),
         "permissions": ["delete"],
     }
@@ -240,8 +251,9 @@ def delete_task_comment(taskId: str, commentId: str):
 
 
 @router.post("/{taskId}/subtasks", summary="创建子任务")
-def create_subtask(taskId: str, payload: dict[str, Any] = Body(...)):
-    title = str(payload.get("title") or "").strip()
+def create_subtask(taskId: str, payload: SubtaskCreateRequest):
+    body = body_to_dict(payload)
+    title = str(body.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail={"code": "SUBTASK_TITLE_REQUIRED", "message": "请输入子任务标题"})
     subtask = {
@@ -249,8 +261,8 @@ def create_subtask(taskId: str, payload: dict[str, Any] = Body(...)):
         "taskId": taskId,
         "title": title,
         "completed": False,
-        "assigneeId": payload.get("assigneeId"),
-        "sortOrder": payload.get("sortOrder", 6000),
+        "assigneeId": body.get("assigneeId"),
+        "sortOrder": body.get("sortOrder", 6000),
         "version": 1,
         "createdAt": _mock.now_iso(),
     }
@@ -258,8 +270,9 @@ def create_subtask(taskId: str, payload: dict[str, Any] = Body(...)):
 
 
 @router.patch("/{taskId}/subtasks/{subtaskId}", summary="勾选子任务")
-def update_subtask(taskId: str, subtaskId: str, payload: dict[str, Any] = Body(...)):
-    completed = bool(payload.get("completed", True))
+def update_subtask(taskId: str, subtaskId: str, payload: SubtaskUpdateRequest):
+    body = body_to_dict(payload)
+    completed = bool(body.get("completed", True))
     return _mock.api_response(
         {
             "id": subtaskId,
@@ -267,7 +280,7 @@ def update_subtask(taskId: str, subtaskId: str, payload: dict[str, Any] = Body(.
             "completed": completed,
             "completedAt": _mock.now_iso() if completed else None,
             "taskProgress": 40 if completed else 20,
-            "version": int(payload.get("version", 1)) + 1,
+            "version": int(body.get("version", 1)) + 1,
         }
     )
 
@@ -368,31 +381,32 @@ def get_project_kanban_page(projectId: str):
 
 
 @project_router.post("/{projectId}/tasks", summary="在项目内创建任务")
-def create_project_task(projectId: str, payload: dict[str, Any] = Body(...)):
-    payload = {**payload, "projectId": projectId}
-    task = _task_from_payload(payload)
+def create_project_task(projectId: str, payload: TaskWriteRequest):
+    body = {**body_to_dict(payload), "projectId": projectId}
+    task = _task_from_payload(body)
     return _mock.api_response({"taskId": task["id"], "task": _task_card(task), "detail": _task_detail(task)})
 
 
 @project_router.put("/{projectId}/tasks/{taskId}", summary="编辑任务")
-def update_project_task(projectId: str, taskId: str, payload: dict[str, Any] = Body(...)):
-    task = _merge_task_payload(taskId, {**payload, "projectId": projectId})
+def update_project_task(projectId: str, taskId: str, payload: TaskWriteRequest):
+    task = _merge_task_payload(taskId, {**body_to_dict(payload), "projectId": projectId})
     return _mock.api_response({"task": _task_detail(task), "card": _task_card(task), "updatedAt": _mock.now_iso()})
 
 
 @project_router.post("/{projectId}/tasks/{taskId}/transition", summary="任务状态流转")
-def transition_project_task(projectId: str, taskId: str, payload: dict[str, Any] = Body(...)):
-    return _mock.api_response(_transition_payload(task_id=taskId, project_id=projectId, payload=payload))
+def transition_project_task(projectId: str, taskId: str, payload: TaskTransitionRequest):
+    return _mock.api_response(_transition_payload(task_id=taskId, project_id=projectId, payload=body_to_dict(payload)))
 
 
 @project_router.patch("/{projectId}/kanban/order", summary="调整看板顺序")
-def update_kanban_order(projectId: str, payload: dict[str, Any] = Body(...)):
-    columns = payload.get("columns", payload.get("order", []))
+def update_kanban_order(projectId: str, payload: KanbanOrderRequest):
+    body = body_to_dict(payload)
+    columns = body.get("columns", body.get("order", []))
     return _mock.api_response(
         {
             "projectId": projectId,
             "columns": columns,
-            "version": int(payload.get("version", 1)) + 1,
+            "version": int(body.get("version", 1)) + 1,
             "updatedAt": _mock.now_iso(),
         }
     )
@@ -414,8 +428,8 @@ def get_project_kanban_suggestions(
 
 
 @ai_router.post("/project-kanban-suggestions/{suggestionId}/apply", summary="采纳 AI 看板建议")
-def apply_project_kanban_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    body = payload or {}
+def apply_project_kanban_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
     changed_tasks = body.get("taskIds") or body.get("changedTasks") or ["task_001"]
     return _mock.api_response(
         {
@@ -438,8 +452,8 @@ def get_task_suggestions(
 
 
 @ai_router.post("/task-suggestions/{suggestionId}/apply", summary="采纳 AI 任务建议")
-def apply_task_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    body = payload or {}
+def apply_task_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "suggestionId": suggestionId,
@@ -459,8 +473,8 @@ def get_task_ai_suggestions(taskId: str):
 
 
 @ai_router.post("/tasks/{taskId}/suggestions/{suggestionId}/apply", summary="采纳任务 AI 建议")
-def apply_task_ai_suggestion(taskId: str, suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    body = payload or {}
+def apply_task_ai_suggestion(taskId: str, suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
     body.setdefault("taskId", taskId)
     result = apply_task_suggestion(suggestionId, body)["data"]
     result["taskId"] = taskId

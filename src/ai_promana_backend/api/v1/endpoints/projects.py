@@ -4,6 +4,13 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 
 from ai_promana_backend.api.v1.endpoints import _mock
+from ai_promana_backend.schemas.request_bodies import (
+    AiApplyRequest,
+    ProjectArchiveRequest,
+    ProjectBaselineRequest,
+    ProjectWriteRequest,
+    body_to_dict,
+)
 
 
 router = APIRouter()
@@ -176,21 +183,22 @@ def get_project_create_options():
 
 # TODO: 将项目创建表单保存到草稿表，支持同一用户覆盖更新未提交草稿。
 @router.post("/drafts", summary="保存项目草稿")
-def save_project_draft(payload: dict[str, Any] = Body(...)):
+def save_project_draft(payload: ProjectWriteRequest):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "draftId": _mock.make_id("project_draft"),
             "savedAt": _mock.now_iso(),
             "recoverable": True,
-            "draft": _normalize_project_payload(payload),
+            "draft": _normalize_project_payload(body),
         }
     )
 
 
 # TODO: 校验 code 唯一、日期范围、模板和成员有效性，创建项目、成员关系、默认看板和订阅配置。
 @router.post("", summary="创建项目")
-def create_project(payload: dict[str, Any] = Body(...)):
-    project = _project_from_payload(payload)
+def create_project(payload: ProjectWriteRequest):
+    project = _project_from_payload(body_to_dict(payload))
     return _mock.api_response(
         {
             "projectId": project["id"],
@@ -284,36 +292,39 @@ def get_project_edit_form(projectId: str):
 
 # TODO: 保存项目变更时校验 version、日期范围、成员/订阅人有效性，并同步项目动态。
 @router.put("/{projectId}", summary="保存项目变更")
-def update_project(projectId: str, payload: dict[str, Any] = Body(...)):
+def update_project(projectId: str, payload: ProjectWriteRequest):
+    body = body_to_dict(payload)
     project = _project_list_item(_mock.project_lite(projectId))
-    project.update(_normalize_project_payload(payload))
+    project.update(_normalize_project_payload(body))
     project["updatedAt"] = _mock.now_iso()
     return _mock.api_response({"project": project})
 
 
 # TODO: 保存项目编辑草稿，区分创建草稿和已存在项目编辑草稿，返回可恢复的 draftId。
 @router.post("/{projectId}/draft", summary="保存编辑草稿")
-def save_project_edit_draft(projectId: str, payload: dict[str, Any] = Body(...)):
+def save_project_edit_draft(projectId: str, payload: ProjectWriteRequest):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "projectId": projectId,
             "draftId": _mock.make_id("project_edit_draft"),
             "savedAt": _mock.now_iso(),
             "recoverable": True,
-            "draft": _normalize_project_payload(payload),
+            "draft": _normalize_project_payload(body),
         }
     )
 
 
 # TODO: 归档前校验未完成任务、未关闭风险和权限，执行软归档并禁止后续写操作。
 @router.post("/{projectId}/archive", summary="归档项目")
-def archive_project(projectId: str, payload: dict[str, Any] | None = Body(default=None)):
+def archive_project(projectId: str, payload: ProjectArchiveRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "projectId": projectId,
             "status": "archived",
             "statusLabel": STATUS_LABELS["archived"],
-            "reason": (payload or {}).get("reason"),
+            "reason": body.get("reason"),
             "targetPath": "/projects",
             "archivedAt": _mock.now_iso(),
         }
@@ -322,12 +333,13 @@ def archive_project(projectId: str, payload: dict[str, Any] | None = Body(defaul
 
 # TODO: 生成项目排期/任务快照作为基线，保存快照明细并返回 baselineId。
 @router.post("/{projectId}/baseline", summary="设置项目基线")
-def set_project_baseline(projectId: str, payload: dict[str, Any] = Body(default_factory=dict)):
+def set_project_baseline(projectId: str, payload: ProjectBaselineRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "baselineId": _mock.make_id("baseline"),
             "projectId": projectId,
-            "name": payload.get("name", "Default Baseline"),
+            "name": body.get("name", "Default Baseline"),
             "status": "active",
             "createdAt": _mock.now_iso(),
         }
@@ -367,8 +379,8 @@ def get_project_matrix_suggestions(context: str | None = Query(default="projects
 
 
 @ai_router.post("/project-suggestions/{suggestionId}/apply", summary="采纳 AI 项目建议")
-def apply_project_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    body = payload or {}
+def apply_project_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "suggestionId": suggestionId,

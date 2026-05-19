@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 
 from ai_promana_backend.api.v1.endpoints import _mock
+from ai_promana_backend.schemas.request_bodies import AiApplyRequest, DocumentSummaryRequest, DocumentWriteRequest, ExportRequest, body_to_dict
 
 
 router = APIRouter()
@@ -118,18 +119,20 @@ def list_project_doc_versions(projectId: str, docId: str):
 
 
 @router.post("/{projectId}/docs", summary="新建文档")
-def create_project_doc(projectId: str, payload: dict[str, Any] = Body(...)):
-    title = str(payload.get("title") or "").strip()
+def create_project_doc(projectId: str, payload: DocumentWriteRequest):
+    body = body_to_dict(payload)
+    title = str(body.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail={"code": "DOC_VALIDATE_FAILED", "message": "请输入文档标题"})
-    document = _doc_from_payload(projectId, payload, doc_id=_mock.make_id("doc"))
+    document = _doc_from_payload(projectId, body, doc_id=_mock.make_id("doc"))
     return _mock.api_response({"docId": document["docId"], "document": document, "targetPath": f"/project/{projectId}/docs"})
 
 
 @router.put("/{projectId}/docs/{docId}", summary="编辑文档")
-def update_project_doc(projectId: str, docId: str, payload: dict[str, Any] = Body(...)):
-    document = _doc_from_payload(projectId, payload, doc_id=docId)
-    document["version"] = int(payload.get("version", 1)) + 1
+def update_project_doc(projectId: str, docId: str, payload: DocumentWriteRequest):
+    body = body_to_dict(payload)
+    document = _doc_from_payload(projectId, body, doc_id=docId)
+    document["version"] = int(body.get("version", 1)) + 1
     document["latestVersion"] = f"v{document['version']}"
     document["updatedAt"] = _mock.now_iso()
     return _mock.api_response(
@@ -189,17 +192,18 @@ def download_project_doc(projectId: str, docId: str):
 
 
 @router.post("/{projectId}/docs/{docId}/export", summary="导出文档")
-def export_project_doc(projectId: str, docId: str, payload: dict[str, Any] | None = Body(default=None)):
+def export_project_doc(projectId: str, docId: str, payload: ExportRequest | None = None):
+    body = body_to_dict(payload)
     task = _mock.export_task("doc_export")
     task["projectId"] = projectId
     task["docId"] = docId
-    task["fileType"] = (payload or {}).get("fileType", "pdf")
+    task["fileType"] = body.get("fileType", "pdf")
     return _mock.api_response(task)
 
 
 @ai_router.post("/project-docs/{docId}/summary", summary="生成 AI 文档摘要")
-def generate_project_doc_summary(docId: str, payload: dict[str, Any] | None = Body(default=None)):
-    body = payload or {}
+def generate_project_doc_summary(docId: str, payload: DocumentSummaryRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "summaryId": _mock.make_id("summary"),
@@ -228,8 +232,8 @@ def get_project_doc_suggestions(
 
 
 @ai_router.post("/project-doc-suggestions/{suggestionId}/apply", summary="采纳 AI 文档建议")
-def apply_project_doc_suggestion(suggestionId: str, payload: dict[str, Any] | None = Body(default=None)):
-    body = payload or {}
+def apply_project_doc_suggestion(suggestionId: str, payload: AiApplyRequest | None = None):
+    body = body_to_dict(payload)
     return _mock.api_response(
         {
             "suggestionId": suggestionId,
