@@ -1,4 +1,4 @@
-﻿# TODO: 后续真实服务接入后，统一梳理 /api 与 /api/v1 的版本策略、tags 和兼容路由保留周期。
+# TODO: `api/v1/endpoints` 是接口标准目录；routes.py 只做聚合挂载和路径分发。
 from fastapi import APIRouter
 from ai_promana_backend.api.v1.endpoints import (
     admin,
@@ -24,7 +24,7 @@ from ai_promana_backend.api.v1.endpoints import (
 
 router = APIRouter()
 api_router = APIRouter(prefix="/api")
-legacy_router = APIRouter(prefix="/api/v1")
+v1_router = APIRouter(prefix="/api/v1")
 
 api_router.include_router(users.auth_router, prefix="/auth", tags=["认证"])
 api_router.include_router(daily_reports.dashboard_router, prefix="/dashboard", tags=["工作台"])
@@ -52,10 +52,7 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 api_router.include_router(notifications.preferences_router, prefix="/notification-preferences", tags=["通知偏好"])
 api_router.include_router(notifications.ai_router, prefix="/ai", tags=["AI 通知建议"])
 api_router.include_router(system_settings.settings_router, prefix="/settings", tags=["个人设置"])
-api_router.include_router(system_settings.user_router, prefix="/user", tags=["个人设置兼容"])
-api_router.include_router(system_settings.auth_router, prefix="/auth", tags=["账户安全"])
 api_router.include_router(system_settings.admin_router, prefix="/admin", tags=["系统配置"])
-api_router.include_router(system_settings.ai_router, prefix="/ai", tags=["AI 设置建议"])
 api_router.include_router(admin.router, prefix="/admin", tags=["后台管理"])
 api_router.include_router(admin.ai_router, prefix="/ai", tags=["AI 后台建议"])
 api_router.include_router(roles_permissions.router, prefix="/admin", tags=["角色权限"])
@@ -65,7 +62,7 @@ api_router.include_router(teams.router, prefix="/teams", tags=["团队"])
 api_router.include_router(operation_logs.router, prefix="/operation-logs", tags=["操作日志"])
 api_router.include_router(managments.router, prefix="/management", tags=["管理选项"])
 
-legacy_router.include_router(users.router, prefix="/users", tags=["用户管理"])
+v1_router.include_router(users.router, prefix="/users", tags=["用户管理"])
 
 router.include_router(api_router)
-router.include_router(legacy_router)
+router.include_router(v1_router)
