@@ -1,6 +1,6 @@
 # AI Promana Backend
 
-一个基于 FastAPI 的用户认证系统后端，当前使用 `/api/auth/*` JWT 认证链路完成注册、登录与会话刷新。
+一个基于 FastAPI 的用户认证系统后端，包含完整的用户注册、登录功能。
 
 ## 技术栈
 
@@ -113,7 +113,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ### 1. 用户注册
 
-**路径**: `POST /api/auth/register`
+**路径**: `POST /api/v1/users/register`
 
 **请求体**:
 
@@ -131,32 +131,27 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ```json
 {
-    "code": 0,
-    "message": "success",
-    "data": {
-        "userId": "1",
-        "status": "active",
-        "profile": {
-            "name": "测试用户",
-            "department": null,
-            "email": "test@example.com",
-            "phone": "13800138000"
-        }
-    }
+    "id": 1,
+    "username": "testuser",
+    "email": "test@example.com",
+    "phone": "13800138000",
+    "full_name": "测试用户",
+    "role": "user",
+    "created_at": "2024-01-01 00:00:00",
+    "updated_at": "2024-01-01 00:00:00"
 }
 ```
 
 ### 2. 用户登录
 
-**路径**: `POST /api/auth/login`
+**路径**: `POST /api/v1/users/login`
 
 **请求体**:
 
 ```json
 {
     "username": "testuser",
-    "password": "password123",
-    "rememberMe": false
+    "password": "password123"
 }
 ```
 
@@ -164,27 +159,17 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ```json
 {
-    "code": 0,
-    "message": "success",
-    "data": {
-        "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-        "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-        "expiresIn": 1800,
-        "tokenType": "Bearer",
-        "user": {
-            "id": "1",
-            "username": "testuser",
-            "name": "测试用户",
-            "nickname": "测试用户",
-            "avatar": null,
-            "department": null,
-            "position": null,
-            "role": "user",
-            "roleName": "普通用户",
-            "accountStatus": "active",
-            "joinDate": "2026-05-17",
-            "lastLoginAt": "2026-05-17 10:00:00"
-        }
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer",
+    "user": {
+        "id": 1,
+        "username": "testuser",
+        "email": "test@example.com",
+        "phone": "13800138000",
+        "full_name": "测试用户",
+        "role": "user",
+        "created_at": "2024-01-01 00:00:00",
+        "updated_at": "2024-01-01 00:00:00"
     }
 }
 ```
@@ -229,8 +214,6 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - 使用 HS256 算法签名
 - 默认有效期 30 分钟
 - Token 包含：用户 ID、用户名、角色信息
-- `/api/*` 受保护接口统一使用 `Authorization: Bearer <access_token>` 认证
-- Swagger UI 可在右上角点击 `Authorize`，直接粘贴登录返回的 `access_token`
 
 ## 常见问题
 

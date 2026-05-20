@@ -1,16 +1,5 @@
-import sys
-from os import chdir
-from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-PROJECT_ROOT = Path(__file__).resolve().parent
-SRC_PATH = PROJECT_ROOT / "src"
-
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
-
 from ai_promana_backend.api.v1.routes import router as api_v1_router
 from ai_promana_backend.config import settings
 
@@ -38,16 +27,9 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-
-    chdir(PROJECT_ROOT)
-
-    uvicorn_kwargs = {
-        "host": settings.APP_HOST,
-        "port": settings.APP_PORT,
-        "reload": settings.DEBUG,
-    }
-
-    if settings.DEBUG:
-        uvicorn_kwargs["reload_dirs"] = [str(PROJECT_ROOT), str(SRC_PATH)]
-
-    uvicorn.run("main:app", **uvicorn_kwargs)
+    uvicorn.run(
+        "main:app",
+        host=settings.APP_HOST,
+        port=settings.APP_PORT,
+        reload=settings.DEBUG
+    )
