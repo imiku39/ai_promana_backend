@@ -546,7 +546,14 @@ def setup_database() -> None:
     except pymysql.MySQLError as e:
         if conn is not None:
             conn.rollback()
+        error_code = e.args[0] if e.args else None
         print(f"数据库初始化失败：{str(e)}")
+        if error_code == 1045:
+            print("提示：MySQL 用户名或密码错误，请检查项目根目录 .env 里的 MYSQL_USER / MYSQL_PASSWORD。")
+        elif error_code == 1049:
+            print("提示：目标数据库不存在但创建失败，请确认当前账号具有建库权限。")
+        elif error_code == 2003:
+            print("提示：无法连接到 MySQL，请确认 MySQL 服务已启动，并检查 MYSQL_HOST / MYSQL_PORT。")
         raise
     finally:
         if conn is not None:
