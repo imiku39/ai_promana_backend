@@ -1,4 +1,13 @@
+import sys
+from pathlib import Path
+
 import pymysql
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_PATH = PROJECT_ROOT / "src"
+
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
 
 from ai_promana_backend.config import settings
 
@@ -462,6 +471,10 @@ TABLE_SQL = [
         `id` INT NOT NULL AUTO_INCREMENT COMMENT '会话ID',
         `session_id` VARCHAR(100) NOT NULL COMMENT '业务会话ID',
         `user_id` INT NOT NULL COMMENT '用户ID',
+        `access_token` TEXT COMMENT '访问令牌',
+        `refresh_token` TEXT COMMENT '刷新令牌',
+        `access_expires_at` DATETIME DEFAULT NULL COMMENT '访问令牌过期时间',
+        `refresh_expires_at` DATETIME DEFAULT NULL COMMENT '刷新令牌过期时间',
         `device_name` VARCHAR(200) DEFAULT NULL COMMENT '设备名称',
         `ip_address` VARCHAR(50) DEFAULT NULL COMMENT 'IP地址',
         `location` VARCHAR(100) DEFAULT NULL COMMENT '地理位置',
@@ -837,6 +850,10 @@ def setup_database() -> None:
             ("role_templates", "version", "INT DEFAULT 1 COMMENT '乐观锁版本号'"),
             ("role_templates", "reference_count", "INT DEFAULT 0 COMMENT '引用项目/用户数量'"),
             ("role_templates", "updated_by", "INT DEFAULT NULL COMMENT '最近更新人ID'"),
+            ("user_sessions", "access_token", "TEXT COMMENT '访问令牌'"),
+            ("user_sessions", "refresh_token", "TEXT COMMENT '刷新令牌'"),
+            ("user_sessions", "access_expires_at", "DATETIME DEFAULT NULL COMMENT '访问令牌过期时间'"),
+            ("user_sessions", "refresh_expires_at", "DATETIME DEFAULT NULL COMMENT '刷新令牌过期时间'"),
         ]
         
         for table_name, column_name, column_def in columns_to_add:
